@@ -1,14 +1,17 @@
-const { app, BrowserWindow, Menu } = require('electron')
-const log = require('electron-log')
+const path = require('path')
+const { app, Menu, ipcMain } = require('electron')
 const Store = require('./Store')
+const MainWindow = require('./MainWindow')
+const AppTray = require('./AppTray')
 
 // Set env
-process.env.NODE_ENV = 'development'
+process.env.NODE_ENV = 'production'
 
 const isDev = process.env.NODE_ENV !== 'production' ? true : false
 const isMac = process.platform === 'darwin' ? true : false
 
 let mainWindow
+let tray
 
 // Init store & defaults
 const store = new Store({
@@ -22,22 +25,9 @@ const store = new Store({
 })
 
 function createMainWindow() {
-  mainWindow = new BrowserWindow({
-    title: 'Sys track',
-    width: isDev ? 900 : 355,
-    height: 600,
-    icon: './assets/icons/icon.png',
-    resizable: isDev ? true : false,
-    webPreferences: {
-      nodeIntegration: true,
-    },
-  })
+  mainWindow = new MainWindow('./app/index.html', isDev)
 
-  if (isDev) {
-    mainWindow.webContents.openDevTools()
-  }
-
-  mainWindow.loadFile('./app/index.html')
+  
 }
 
 app.on('ready', () => {
@@ -49,12 +39,38 @@ app.on('ready', () => {
 
   const mainMenu = Menu.buildFromTemplate(menu)
   Menu.setApplicationMenu(mainMenu)
+
+  // Prevent close app on click 'X' button and quit app only when use command Quit 
+  mainWindow.on('close', event => {
+    if (!app.isQuitting) {
+      event.preventDefault()
+      mainWindow.hide()
+    }
+
+    return true
+  })
+
+  const icon = path.join(__dirname, 'assets', 'icons', 'tray_icon.png')
+
+  // Create tray
+  tray = new AppTray(icon, mainWindow)
 })
 
 const menu = [
   ...(isMac ? [{ role: 'appMenu' }] : []),
   {
     role: 'fileMenu',
+  },
+  {
+    label: 'View',
+    submenu: [
+      {
+        label: 'Toggle Navigation',
+        click: () => {
+          mainWindow.webContents.send('nav:toggle')
+        }
+      }
+    ]
   },
   ...(isDev
     ? [
@@ -70,6 +86,12 @@ const menu = [
       ]
     : []),
 ]
+
+// Set settings
+ipcMain.on('settings:set', (event, value) => {
+  store.set('settings', value)
+  mainWindow.webContents.send('settings:get', store.get('settings'))
+})
 
 app.on('window-all-closed', () => {
   if (!isMac) {
